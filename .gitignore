@@ -1,0 +1,36 @@
+# Python files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# Editor directories and files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Environment
+env/
+venv/
+.venv/
+*.env
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Generated output
+*.docx
+
+# Conda
+.conda/
+
+# Test outputs
+.pytest_cache/
+
+# OS files
+Thumbs.db

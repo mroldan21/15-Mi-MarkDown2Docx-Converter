@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MD → DOCX · Converter</title>
+
+  <!-- Google Fonts: display elegante + mono para el editor -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ═══════════════════════════════════════════════════════
+       VARIABLES Y RESET
+    ═══════════════════════════════════════════════════════ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-deep:      #080b12;
+      --bg-panel:     rgba(12, 17, 28, 0.75);
+      --bg-glass:     rgba(255, 255, 255, 0.04);
+      --border:       rgba(255, 255, 255, 0.08);
+      --border-glow:  rgba(99, 179, 255, 0.45);
+      --accent-a:     #3b82f6;   /* azul eléctrico */
+      --accent-b:     #8b5cf6;   /* violeta */
+      --accent-c:     #06b6d4;   /* cian */
+      --text-primary: #e8edf5;
+      --text-muted:   #6b7a99;
+      --font-ui:      'Syne', sans-serif;
+      --font-mono:    'JetBrains Mono', monospace;
+      --radius:       14px;
+      --transition:   0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      font-family: var(--font-ui);
+      overflow-x: hidden;
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       FONDO ANIMADO — MESH GRADIENT + RUIDO
+    ═══════════════════════════════════════════════════════ */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 20% -10%, rgba(59,130,246,.18) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 50% at 80% 110%, rgba(139,92,246,.15) 0%, transparent 55%),
+        radial-gradient(ellipse 40% 40% at 60% 50%, rgba(6,182,212,.07) 0%, transparent 60%);
+      animation: meshDrift 20s ease-in-out infinite alternate;
+    }
+
+    /* Capa de ruido para darle textura */
+    body::after {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      opacity: .035;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+      background-size: 180px;
+    }
+
+    @keyframes meshDrift {
+      0%   { transform: scale(1)    rotate(0deg); }
+      50%  { transform: scale(1.08) rotate(1deg); }
+      100% { transform: scale(1)    rotate(-1deg); }
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       LAYOUT PRINCIPAL
+    ═══════════════════════════════════════════════════════ */
+    .app {
+      position: relative; z-index: 1;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-height: 100vh;
+      padding: 0 clamp(16px, 5vw, 64px);
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       CABECERA
+    ═══════════════════════════════════════════════════════ */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 28px 0 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo {
+      display: flex; align-items: center; gap: 12px;
+    }
+    .logo-icon {
+      width: 38px; height: 38px;
+      background: linear-gradient(135deg, var(--accent-a), var(--accent-b));
+      border-radius: 10px;
+      display: grid; place-items: center;
+      font-size: 18px;
+      box-shadow: 0 0 20px rgba(59,130,246,.4);
+    }
+    .logo-text {
+      font-size: 1.15rem; font-weight: 800;
+      letter-spacing: -.02em;
+    }
+    .logo-text span { color: var(--accent-c); }
+
+    .badge {
+      font-size: .65rem; font-weight: 600; letter-spacing: .12em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      color: var(--text-muted);
+      background: var(--bg-glass);
+      backdrop-filter: blur(8px);
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       ÁREA CENTRAL — DOS COLUMNAS
+    ═══════════════════════════════════════════════════════ */
+    .workspace {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      padding: 28px 0;
+      align-items: start;
+    }
+
+    @media (max-width: 768px) {
+      .workspace { grid-template-columns: 1fr; }
+    }
+
+    /* ── Panel genérico (glass card) ── */
+    .panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      overflow: hidden;
+      transition: border-color var(--transition), box-shadow var(--transition);
+    }
+
+    .panel-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      font-size: .75rem; font-weight: 600;
+      letter-spacing: .1em; text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .panel-header .dot-row { display: flex; gap: 6px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot-r { background: #ff5f56; }
+    .dot-y { background: #ffbd2e; }
+    .dot-g { background: #27c93f; }
+
+    /* ── Textarea de Markdown ── */
+    .editor-panel { display: flex; flex-direction: column; }
+
+    .editor-panel:focus-within {
+      border-color: var(--border-glow);
+      box-shadow:
+        0 0 0 1px var(--border-glow),
+        0 0 30px rgba(99,179,255,.12),
+        0 0 60px rgba(99,179,255,.06);
+    }
+
+    #md-input {
+      flex: 1;
+      width: 100%; min-height: 440px;
+      background: transparent;
+      border: none; outline: none; resize: vertical;
+      padding: 20px;
+      font-family: var(--font-mono);
+      font-size: .82rem; line-height: 1.75;
+      color: var(--text-primary);
+      caret-color: var(--accent-c);
+    }
+
+    #md-input::placeholder { color: var(--text-muted); opacity: .6; }
+
+    /* scrollbar fina */
+    #md-input::-webkit-scrollbar { width: 4px; }
+    #md-input::-webkit-scrollbar-track { background: transparent; }
+    #md-input::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,.1);
+      border-radius: 4px;
+    }
+
+    /* ── Panel de Vista Previa / Info ── */
+    .info-panel {
+      display: flex; flex-direction: column; gap: 0;
+    }
+
+    .feature-list {
+      padding: 20px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .feature-item {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 12px 14px;
+      background: var(--bg-glass);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      transition: background var(--transition), border-color var(--transition);
+    }
+    .feature-item:hover {
+      background: rgba(255,255,255,.07);
+      border-color: rgba(99,179,255,.25);
+    }
+    .feature-icon {
+      font-size: 1rem; width: 26px; flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .feature-title { font-size: .78rem; font-weight: 700; }
+    .feature-desc  { font-size: .72rem; color: var(--text-muted); margin-top: 2px; line-height: 1.5; }
+
+    /* Ejemplo de sintaxis */
+    .syntax-demo {
+      margin: 0 20px 20px;
+      padding: 14px 16px;
+      background: rgba(0,0,0,.35);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-family: var(--font-mono);
+      font-size: .73rem;
+      line-height: 2;
+      color: var(--text-muted);
+    }
+    .syn-h1  { color: #60a5fa; }
+    .syn-h2  { color: #818cf8; }
+    .syn-b   { color: #f0abfc; font-weight: 700; }
+    .syn-i   { color: #67e8f9; font-style: italic; }
+    .syn-c   { color: #86efac; }
+
+    /* ── Estado del archivo generado ── */
+    #file-status {
+      margin: 0 20px 20px;
+      padding: 14px 16px;
+      border-radius: 10px;
+      font-size: .78rem;
+      display: none;
+      align-items: center; gap: 10px;
+      animation: fadeUp .35s ease forwards;
+    }
+    #file-status.success {
+      display: flex;
+      background: rgba(16, 185, 129, .12);
+      border: 1px solid rgba(16, 185, 129, .3);
+      color: #6ee7b7;
+    }
+    #file-status.error {
+      display: flex;
+      background: rgba(239, 68, 68, .12);
+      border: 1px solid rgba(239, 68, 68, .3);
+      color: #fca5a5;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       BOTÓN CONVERTIR — GRADIENTE ANIMADO
+    ═══════════════════════════════════════════════════════ */
+    .action-row {
+      padding: 0 20px 20px;
+    }
+
+    #convert-btn {
+      position: relative;
+      width: 100%; padding: 15px 24px;
+      border: none; border-radius: 10px;
+      cursor: pointer;
+      font-family: var(--font-ui);
+      font-size: .9rem; font-weight: 700;
+      letter-spacing: .04em;
+      color: #fff;
+      overflow: hidden;
+      transition: transform var(--transition), box-shadow var(--transition);
+    }
+
+    /* Capa de gradiente animado */
+    #convert-btn::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(
+        90deg,
+        var(--accent-a) 0%,
+        var(--accent-b) 33%,
+        var(--accent-c) 66%,
+        var(--accent-a) 100%
+      );
+      background-size: 300% 100%;
+      animation: gradShift 4s linear infinite;
+      z-index: 0;
+    }
+
+    /* Brillo superior (highlight) */
+    #convert-btn::after {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(180deg, rgba(255,255,255,.18) 0%, transparent 60%);
+      z-index: 1;
+    }
+
+    #convert-btn span {
+      position: relative; z-index: 2;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+
+    #convert-btn:hover  { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(59,130,246,.4); }
+    #convert-btn:active { transform: translateY(0); }
+    #convert-btn:disabled {
+      opacity: .55; cursor: not-allowed;
+      transform: none; box-shadow: none;
+    }
+    #convert-btn:disabled::before { animation: none; }
+
+    @keyframes gradShift {
+      0%   { background-position: 0% 50%; }
+      100% { background-position: 300% 50%; }
+    }
+
+    /* Spinner de carga */
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ═══════════════════════════════════════════════════════
+       FOOTER
+    ═══════════════════════════════════════════════════════ */
+    footer {
+      padding: 18px 0;
+      border-top: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      font-size: .72rem; color: var(--text-muted);
+    }
+    footer a { color: var(--accent-c); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    /* ═══════════════════════════════════════════════════════
+       CONTADOR DE PALABRAS
+    ═══════════════════════════════════════════════════════ */
+    .word-count {
+      font-size: .68rem; color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+  </style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ────────────── CABECERA ────────────── -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">✦</div>
+      <span class="logo-text">MD<span>→</span>DOCX</span>
+    </div>
+    <span class="badge">v1.0 · Local</span>
+  </header>
+
+  <!-- ────────────── WORKSPACE ────────────── -->
+  <main class="workspace">
+
+    <!-- Panel izquierdo: editor -->
+    <div class="panel editor-panel">
+      <div class="panel-header">
+        <div class="dot-row">
+          <span class="dot dot-r"></span>
+          <span class="dot dot-y"></span>
+          <span class="dot dot-g"></span>
+        </div>
+        <span>Editor Markdown</span>
+        <span class="word-count" id="word-count">0 palabras</span>
+      </div>
+
+      <textarea
+        id="md-input"
+        placeholder="# Escribe tu Markdown aquí...
+
+## Sección de ejemplo
+
+Este es un párrafo con **negrita** y *cursiva*.
+
+### Lista de características
+
+- Encabezados H1–H4 con estilos Word nativos
+- Soporte de **negrita**, *cursiva* y \`código\`
+- Listas con viñetas y numeradas
+- Bloques de código y citas
+
+> Una cita inspiradora va aquí."
+      ></textarea>
+    </div>
+
+    <!-- Panel derecho: info + acciones -->
+    <div class="panel info-panel">
+      <div class="panel-header">
+        <div class="dot-row">
+          <span class="dot dot-r"></span>
+          <span class="dot dot-y"></span>
+          <span class="dot dot-g"></span>
+        </div>
+        <span>Formato Soportado</span>
+        <span></span>
+      </div>
+
+      <div class="feature-list">
+        <div class="feature-item">
+          <span class="feature-icon">📑</span>
+          <div>
+            <div class="feature-title">Encabezados Jerárquicos</div>
+            <div class="feature-desc"># H1 → ## H2 → ### H3 — estilos nativos de Word para índice automático</div>
+          </div>
+        </div>
+        <div class="feature-item">
+          <span class="feature-icon">✒️</span>
+          <div>
+            <div class="feature-title">Formato Inline</div>
+            <div class="feature-desc">**negrita**, *cursiva*, ***ambos***, `código inline`</div>
+          </div>
+        </div>
+        <div class="feature-item">
+          <span class="feature-icon">📋</span>
+          <div>
+            <div class="feature-title">Listas</div>
+            <div class="feature-desc">- viñetas con guion/asterisco · 1. listas numeradas</div>
+          </div>
+        </div>
+        <div class="feature-item">
+          <span class="feature-icon">💬</span>
+          <div>
+            <div class="feature-title">Bloques especiales</div>
+            <div class="feature-desc">&gt; citas · ``` bloque de código ``` · — separadores</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Demo de sintaxis -->
+      <div class="syntax-demo">
+        <div class="syn-h1"># Título Principal</div>
+        <div class="syn-h2">## Sección Secundaria</div>
+        <div>Texto <span class="syn-b">**negrita**</span> y <span class="syn-i">*cursiva*</span></div>
+        <div>- Item · - Item · 1. Numerado</div>
+        <div class="syn-c">```bloque de código```</div>
+        <div>&gt; Una cita en bloque</div>
+      </div>
+
+      <!-- Estado del archivo -->
+      <div id="file-status"></div>
+
+      <!-- Botón principal -->
+      <div class="action-row">
+        <button id="convert-btn">
+          <span>
+            <svg id="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+              <path d="M2 17l10 5 10-5"/>
+              <path d="M2 12l10 5 10-5"/>
+            </svg>
+            Convertir a .docx
+          </span>
+        </button>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ────────────── FOOTER ────────────── -->
+  <footer>
+    <span>Flask + python-docx · Backend en</span>
+    <a href="http://localhost:5000" target="_blank">localhost:5000</a>
+    <span>·</span>
+    <span>Entorno Conda: <code>md2docx</code></span>
+  </footer>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     JAVASCRIPT
+═══════════════════════════════════════════════════════ -->
+<script>
+  const BACKEND_URL = 'http://localhost:5000/convert';
+
+  const inputEl     = document.getElementById('md-input');
+  const convertBtn  = document.getElementById('convert-btn');
+  const btnIcon     = document.getElementById('btn-icon');
+  const statusEl    = document.getElementById('file-status');
+  const wordCountEl = document.getElementById('word-count');
+
+  // ── Contador de palabras en tiempo real ──────────────────
+  inputEl.addEventListener('input', () => {
+    const text  = inputEl.value.trim();
+    const words = text ? text.split(/\s+/).length : 0;
+    const lines = text ? text.split('\n').length : 0;
+    wordCountEl.textContent = `${words} palabras · ${lines} líneas`;
+  });
+
+  // ── Mostrar estado (éxito / error) ────────────────────────
+  function showStatus(type, message) {
+    statusEl.className = type;           // 'success' | 'error'
+    statusEl.style.display = 'flex';
+    statusEl.innerHTML = `
+      <span>${type === 'success' ? '✅' : '❌'}</span>
+      <span>${message}</span>
+    `;
+  }
+
+  // ── Estado del botón ──────────────────────────────────────
+  function setLoading(loading) {
+    convertBtn.disabled = loading;
+    const btnSpan = convertBtn.querySelector('span');
+    if (loading) {
+      btnSpan.innerHTML = '<div class="spinner"></div> Generando documento…';
+    } else {
+      btnSpan.innerHTML = `
+        <svg id="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+          <path d="M2 17l10 5 10-5"/>
+          <path d="M2 12l10 5 10-5"/>
+        </svg>
+        Convertir a .docx
+      `;
+    }
+  }
+
+  // ── Descarga del Blob ─────────────────────────────────────
+  function downloadBlob(blob, filename) {
+    const url  = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href     = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    // Liberar la URL del objeto después de un momento
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
+
+  // ── Handler principal ─────────────────────────────────────
+  convertBtn.addEventListener('click', async () => {
+    const markdown = inputEl.value.trim();
+
+    // Validación básica en cliente
+    if (!markdown) {
+      showStatus('error', 'El editor está vacío. Escribe algo de Markdown primero.');
+      return;
+    }
+
+    setLoading(true);
+    statusEl.style.display = 'none';
+
+    try {
+      const response = await fetch(BACKEND_URL, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ markdown }),
+      });
+
+      if (!response.ok) {
+        // Intentar leer el JSON de error del backend
+        let errorMsg = `Error del servidor: ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData.error) errorMsg = errData.error;
+        } catch (_) { /* ignora */ }
+        throw new Error(errorMsg);
+      }
+
+      // Obtener el nombre del archivo desde el header Content-Disposition (si existe)
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const nameMatch   = disposition.match(/filename="?([^";\n]+)"?/);
+      const filename    = nameMatch ? nameMatch[1] : `documento-${Date.now()}.docx`;
+
+      const blob = await response.blob();
+      downloadBlob(blob, filename);
+
+      showStatus('success', `¡Listo! "${filename}" descargado correctamente.`);
+
+    } catch (err) {
+      console.error(err);
+      // Mensaje amigable cuando el servidor no responde
+      if (err instanceof TypeError && err.message.includes('fetch')) {
+        showStatus('error', '⚡ No se puede conectar con el backend. ¿Está corriendo <code>python app.py</code>?');
+      } else {
+        showStatus('error', err.message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  // ── Atajos de teclado ─────────────────────────────────────
+  // Ctrl+Enter (o Cmd+Enter) dispara la conversión
+  inputEl.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      convertBtn.click();
+    }
+  });
+</script>
+
+</body>
+</html>
