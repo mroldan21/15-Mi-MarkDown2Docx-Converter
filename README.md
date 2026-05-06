@@ -1,4 +1,4 @@
-# MD → DOCX Converter
+# MD → DOCX Converter v1
 
 Convierte texto **Markdown** a archivos **Word (.docx)** con estilos nativos, lista para el índice automático de Word.
 
