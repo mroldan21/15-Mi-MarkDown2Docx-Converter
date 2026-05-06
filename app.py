@@ -38,7 +38,8 @@ app.add_middleware(
 # Modelo de entrada (Pydantic valida automáticamente)
 # ---------------------------------------------------------------------------
 class MarkdownPayload(BaseModel):
-    markdown: str
+    markdown: str          # sin límite de tamaño — el SO gestiona la memoria
+    filename: str = "documento"  # nombre base del archivo descargado (sin extensión)
 
 # ---------------------------------------------------------------------------
 # Helper: detección de secuencias emoji completas
@@ -164,22 +165,25 @@ def _add_text_runs(paragraph, text: str, bold=False, italic=False,
 # Helpers de formato inline (negrita, cursiva, código inline)
 # ---------------------------------------------------------------------------
 
+# Compilado una sola vez a nivel de módulo — no dentro de la función
+_INLINE_RE = re.compile(
+    r'(\*\*\*(?P<bold_italic>.+?)\*\*\*)'   # ***bold+italic***
+    r'|(\*\*(?P<bold>.+?)\*\*)'              # **bold**
+    r'|(\*(?P<italic>.+?)\*)'                # *italic*
+    r'|(`(?P<code>.+?)`)',                   # `code`
+    re.DOTALL
+)
+
+
 def apply_inline_formats(paragraph, text: str):
     """
     Parsea el texto buscando **negrita**, *cursiva*, `código` y combinaciones.
+    Usa _INLINE_RE compilado a nivel de módulo — no recompila en cada llamada.
     Dentro de cada segmento llama a _add_text_runs para manejar emojis
     correctamente (fuente Segoe UI Emoji) sin romper el resto del formato.
     """
-    pattern = re.compile(
-        r'(\*\*\*(?P<bold_italic>.+?)\*\*\*)'   # ***bold+italic***
-        r'|(\*\*(?P<bold>.+?)\*\*)'              # **bold**
-        r'|(\*(?P<italic>.+?)\*)'                # *italic*
-        r'|(`(?P<code>.+?)`)',                   # `code`
-        re.DOTALL
-    )
-
     last_end = 0
-    for m in pattern.finditer(text):
+    for m in _INLINE_RE.finditer(text):
         # Texto plano antes del match (puede contener emojis)
         if m.start() > last_end:
             _add_text_runs(paragraph, text[last_end:m.start()])
@@ -475,11 +479,14 @@ def markdown_to_docx(md_text: str) -> io.BytesIO:
             lang = line.strip()[3:].strip().lower()
             code_lines = []
             i += 1
+            # FIX: guard contra bloque sin cerrar — consume hasta ``` o EOF
             while i < len(lines) and not lines[i].strip().startswith('```'):
                 code_lines.append(lines[i])
                 i += 1
             _add_code_block(doc, '\n'.join(code_lines), language=lang)
-            i += 1
+            # Avanzar sobre el ``` de cierre solo si no llegamos a EOF
+            if i < len(lines):
+                i += 1
             continue
 
         # ── Tabla Markdown ────────────────────────────────────────────────
@@ -526,14 +533,18 @@ def markdown_to_docx(md_text: str) -> io.BytesIO:
             continue
 
         # ── Cita en bloque ────────────────────────────────────────────────
+        # FIX: usa apply_inline_formats para soportar negrita, cursiva y emojis
         blockquote_match = re.match(r'^>\s?(.*)', line)
         if blockquote_match:
             content = blockquote_match.group(1).strip()
             p = doc.add_paragraph()
             p.paragraph_format.left_indent = Inches(0.4)
-            run = p.add_run(content)
-            run.italic = True
-            run.font.color.rgb = RGBColor(0x7F, 0x7F, 0x7F)
+            # Añadir el texto con formato inline completo
+            apply_inline_formats(p, content)
+            # Aplicar cursiva y color gris a todos los runs generados
+            for run in p.runs:
+                run.italic = True
+                run.font.color.rgb = RGBColor(0x7F, 0x7F, 0x7F)
             i += 1
             continue
 
@@ -549,7 +560,9 @@ def markdown_to_docx(md_text: str) -> io.BytesIO:
             continue
 
         # ── Párrafo normal ────────────────────────────────────────────────
+        # FIX: 6 pt de separación inferior para evitar paredes de texto
         p = doc.add_paragraph(style='Normal')
+        p.paragraph_format.space_after = Pt(6)
         apply_inline_formats(p, line.strip())
         i += 1
 
@@ -572,8 +585,9 @@ async def health_check():
 @app.post("/convert", tags=["converter"])
 async def convert(payload: MarkdownPayload):
     """
-    Recibe JSON: { "markdown": "..." }
+    Recibe JSON: { "markdown": "...", "filename": "mi-doc" }
     Devuelve el archivo .docx como stream descargable.
+    El campo filename es opcional (por defecto: "documento").
     """
     if not payload.markdown.strip():
         raise HTTPException(
@@ -589,16 +603,25 @@ async def convert(payload: MarkdownPayload):
             detail=f"Error interno al generar el documento: {str(e)}"
         )
 
+    # RFC 5987: soporta nombres con tildes, espacios y caracteres especiales
+    import urllib.parse
+    base_name  = (payload.filename or "documento").strip() or "documento"
+    safe_ascii = re.sub(r"[^\w\-]", "_", base_name)          # fallback ASCII
+    safe_utf8  = urllib.parse.quote(base_name, safe="")         # percent-encoded
+    rfc5987    = "UTF-8" + "''" + safe_utf8 + ".docx"          # spec literal ''
+
     headers = {
-        "Content-Disposition": 'attachment; filename="documento.docx"'
+        "Content-Disposition": (
+            f'attachment; filename="{safe_ascii}.docx"; filename*=' + rfc5987
+        )
     }
 
-    # StreamingResponse es el equivalente FastAPI de send_file()
     return StreamingResponse(
         docx_buffer,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers=headers,
     )
+
 
 
 # ---------------------------------------------------------------------------
